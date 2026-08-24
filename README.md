@@ -1,6 +1,7 @@
 # 🚗 Automated Cloud Data Warehouse & BI Suite for Bolt Drive
 
-![Bolt Drive Dashboard Preview](dashboard_preview.png)
+![Dashboard Preview](dashboard_preview.png)
+
 
 A fully automated, production-grade cloud ELT data pipeline and dimensional data warehouse designed for global car-sharing performance tracking. Built entirely on cloud infrastructure to bypass heavy local dependencies and reduce ongoing server maintenance costs to zero.
 
