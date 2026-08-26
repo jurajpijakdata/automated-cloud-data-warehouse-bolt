@@ -6,11 +6,11 @@ print("🚀 PRODUCTION DEPLOYMENT: Starting Bolt Drive ETL Pipeline...")
 # =====================================================================
 # 1. DATABASE CONNECTION CONFIGURATION (Pointing Method)
 # =====================================================================
-db_user = "postgres.ckrpgveenhsoexlxemme"
-db_password = "password"
-db_host = "aws-1-eu-west-1.pooler.supabase.com"
+db_user = "YOUR_DATABASE_USER"
+db_password = "YOUR_DATABASE_PASSWORD"
+db_host = "YOUR_DATABASE_HOST"
 db_port = 6543                    
-db_name = "postgres"
+db_name = "YOUR_DATABASE_NAME"
 
 # Constructing the secure PostgreSQL connection URI string
 connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
