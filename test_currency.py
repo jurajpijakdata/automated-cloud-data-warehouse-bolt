@@ -1,12 +1,16 @@
-# 1. Ručne zadefinujeme to, čo funkcia potrebuje k životu v pamäti, aby nemusela liezť do cloudu
+import pandas as pd
+
+# Cached exchange rates for local execution testing
 current_rates = {"EUR": 1.0, "CZK": 25.20, "USD": 1.09}
 
-# 2. Sem skopírujeme čistú izolovanú funkciu z tvojho ETL, aby sme ju otestovali lokálne
 def clean_and_convert_currency_live(row):
+    """
+    Isolated production function with the applied negative value fix.
+    """
     try:
         price = row['raw_price']
         if isinstance(price, str):
-            # Tu je tvoja opravená podmienka aj s mínuskom (,-)
+            # The exact fix applied with the hyphen (,-) to preserve negative numbers
             price = ''.join(c for c in price if c.isdigit() or c in '.,-')
             price = float(price.replace(',', '.'))
         else:
@@ -26,17 +30,21 @@ def clean_and_convert_currency_live(row):
     except Exception as e:
         return 0.0
 
-# 3. Vykonáme samotný test v pamäti tvojho počítača
-import pandas as pd
+def test_negative_price_stays_negative():
+    """
+    Verify that negative currency values (refunds) are correctly preserved 
+    and not accidentally normalized to absolute positive values.
+    """
+    test_row = {"raw_price": "-25.00", "currency": "EUR"}
+    result = clean_and_convert_currency_live(test_row)
+    
+    print("\n" + "="*50)
+    print(f"PIPELINE TEST OUTPUT: {result}")
+    print("="*50)
+    
+    assert result < 0, f"Critical Bug: Negative transaction turned positive ({result})"
+    print("🟢 SUCCESS: Negative sign preserved. Financial integrity verified.\n")
 
-vysledok = clean_and_convert_currency_live({"raw_price": "-25.00", "currency": "EUR"})
+if __name__ == "__main__":
+    test_negative_price_stays_negative()
 
-print("\n=========================================")
-print(f"VÝSLEDOK TVOJHO KÓDU JE: {vysledok}")
-print("=========================================")
-
-if vysledok < 0:
-    print("🟢 USPECH: Mínusko zostalo zachované! Kód drží finančnú pravdu.")
-else:
-    print("🔴 CHYBA: Mínusko zmizlo! Z vratky sa stala tržba.")
-print("=========================================\n")
