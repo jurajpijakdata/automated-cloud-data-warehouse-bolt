@@ -39,7 +39,8 @@ def clean_and_convert_currency_live(row):
         price = row['raw_price']
         if isinstance(price, str):
             # Strip out accidental text/letters (e.g. '12.50a') and standardize separators
-            price = ''.join(c for c in price if c.isdigit() or c in '.,')
+            price = ''.join(c for c in price if c.isdigit() or c in '.,-')
+
             price = float(price.replace(',', '.'))
         else:
             price = float(price)
