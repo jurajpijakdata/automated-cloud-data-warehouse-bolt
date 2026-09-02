@@ -6,25 +6,24 @@ from dotenv import load_dotenv
 
 print("🚀 Starting UpDataLogic Bolt Drive ETL Pipeline...")
 
-# Load hidden database credentials from the local .env file
-load_dotenv()
+# Vynútené načítanie lokálneho .env súboru s prepísaním systémovej cache Windowsu
+load_dotenv(override=True)
 
 # =====================================================================
-# 1. DATABASE CONNECTION CONFIGURATION
+# 1. DATABASE CONNECTION CONFIGURATION (Strict Security Model)
 # =====================================================================
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT", "6543")
+DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
 
-# Fail fast if connection environmental variables are completely missing
-if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
+# Ak v .env niečo chýba, pipeline z bezpečnostných dôvodov hlučne zastavíme
+if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
     print("\n❌ CRITICAL CONFIG FAILURE: Missing database environment variables in .env", file=sys.stderr)
-    print("Please replicate .env.example into a local .env file with valid credentials.", file=sys.stderr)
     sys.exit(1)
 
-# Constructing the secure PostgreSQL connection URI string
+# Dynamické vyskladanie pripojenia pre bezpečný Connection Pooler
 connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(connection_string)
 
@@ -33,39 +32,35 @@ engine = create_engine(connection_string)
 # =====================================================================
 def load_exchange_rates_from_cloud():
     try:
-        # Fetching the official currency exchange matrix stored in our cloud DB
+        # Načítanie oficiálnej matice menových kurzov z databázy
         df_rates = pd.read_sql("SELECT * FROM dim_exchange_rates", engine)
         return dict(zip(df_rates['currency'], df_rates['exchange_rate_to_eur']))
     except Exception as e:
-        # Emergency fail-safe backup if database network connection fails
-        print(f"⚠️ Warning: Cloud rate lookup failed ({e}). Applying fallback matrix.")
+        print(f"⚠️ Warning: Cloud structure verification status ({e}). Applying operational fallback matrix.")
         return {"EUR": 1.0, "CZK": 25.20, "USD": 1.09}
 
-# Initialize and cache active currency exchange rates into memory
+# Uloženie aktívnych kurzov do dočasnej pamäte cache
 current_rates = load_exchange_rates_from_cloud()
 
 def clean_and_convert_currency_live(row):
     try:
-        # --- FULL PRICE STRING SANITIZATION ---
+        # Sanitizácia textových anomálií v cenách (napr. '500.00a')
         price = row['raw_price']
         if isinstance(price, str):
-            # Strict validation rule keeping minus sign intact for financial refunds
             price = ''.join(c for c in price if c.isdigit() or c in '.,-')
             price = float(price.replace(',', '.'))
         else:
             price = float(price)
             
-        # --- FULL CURRENCY STRING VALIDATION ---
         currency = row['currency']
         if pd.isna(currency) or str(currency).strip() == '':
-            currency = 'EUR'  # Safe corporate default if string is missing
+            currency = 'EUR'
         else:
             currency = str(currency).strip().upper()
             
-        # --- HISTORICAL FX CONVERSION LOOP ---
         rate_to_use = current_rates.get(currency, 1.0)
         if float(rate_to_use) <= 0:
-            rate_to_use = 1.0  # Zero division protection mechanism
+            rate_to_use = 1.0
             
         return round(price / float(rate_to_use), 2)
     except Exception as e:
@@ -78,7 +73,7 @@ def clean_and_convert_currency_live(row):
 try:
     print("📥 EXTRACTION: Downloading raw records from cloud dataset...")
     df_raw_rides = pd.read_sql("SELECT * FROM raw_rides", engine)
-    print(f"✅ SUCCESS: Extracted {len(df_raw_rides):,} raw transactional rows from the server.")
+    print(f"✅ SUCCESS: Extracted {len(df_raw_rides):,} raw rows from the server.")
 except Exception as e:
     print(f"\n❌ EXTRACTION STAGE FAILED: {e}", file=sys.stderr)
     sys.exit(1)
@@ -91,14 +86,14 @@ print("⏳ TRANSFORMATION: Running calculation engine and formatting final schem
 df_raw_rides['start_timestamp'] = pd.to_datetime(df_raw_rides['start_timestamp'])
 df_raw_rides['end_timestamp'] = pd.to_datetime(df_raw_rides['end_timestamp'])
 
-# Calculate precise ride runtime duration minutes
+# Výpočet dĺžky jazdy v minútach
 df_raw_rides['duration_minutes'] = (df_raw_rides['end_timestamp'] - df_raw_rides['start_timestamp']).dt.total_seconds() / 60.0
 df_raw_rides['duration_minutes'] = df_raw_rides['duration_minutes'].round(1)
 
-# Deploy the string sanitization and currency conversion loops row-by-row
+# Aplikácia row-by-row čistenia a konverzie mien
 df_raw_rides['price_eur'] = df_raw_rides.apply(clean_and_convert_currency_live, axis=1)
 
-# Drop messy raw metrics to establish clean production quality columns
+# Odstránenie starých nepotrebných stĺpcov pre finálnu čistú fact tabuľku
 df_fact_rides = df_raw_rides.drop(columns=['raw_price', 'currency'])
 print("✨ SUCCESS: Data transformation stage completed successfully!")
 
@@ -109,7 +104,6 @@ try:
     print(f"📊 DATA AUDIT: Final package contains {len(df_fact_rides):,} production rows.")
     print("📤 LOADING: Injecting clean fact records into production storage layer...")
     
-    # if_exists='append' ensures incremental loading without wiping out data history
     df_fact_rides.to_sql('fact_rides', engine, if_exists='append', index=False)
     print("\n🏆 PIPELINE SUCCESS: All data successfully sanitized and written to Cloud DB!")
     
