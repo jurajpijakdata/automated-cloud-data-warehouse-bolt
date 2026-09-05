@@ -1,11 +1,13 @@
 import re
+import logging
 import pandas as pd
 from decimal import Decimal, InvalidOperation
 
 def clean_and_convert_currency_live(row, rates_matrix):
     """
-    Pure Financial Token Parser completely isolated from environment footprints.
-    Strictly verifies formatting rules, preserves negative flags, and scales Decimals.
+    Pure Financial Token Parser optimized for high-precision calculations.
+    Strictly verifies formatting rules, preserves negative flags (refunds), and handles spacing anomalies.
+    Returns Decimal objects or None for malformed inputs to enable active quarantine metrics counts.
     """
     raw_price = row['raw_price']
     currency = row['currency']
@@ -24,7 +26,7 @@ def clean_and_convert_currency_live(row, rates_matrix):
 
     price_str = str(raw_price).strip()
 
-    # Self-Healing text grouping corrections
+    # Self-Healing text grouping corrections (EU/US formats handling matrix)
     if ',' in price_str and '.' in price_str:
         if price_str.find(',') < price_str.find('.'):
             price_str = price_str.replace(',', '')
@@ -35,10 +37,10 @@ def clean_and_convert_currency_live(row, rates_matrix):
 
     price_str = price_str.replace('€', '').replace('$', '').strip()
 
-    # Strict regex shield verification
+    # Strict regex shield verification (Enforces precisely one decimal system)
     match = re.match(r"^-?\d+(?:\.\d+)?$", price_str)
     if not match:
-        return None
+        return None  # Triggers quarantine logging metric downstream
 
     try:
         parsed_decimal = Decimal(price_str)

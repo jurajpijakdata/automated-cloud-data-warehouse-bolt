@@ -2,7 +2,7 @@
 
 ![Dashboard Preview](dashboard_preview.png)
 
-A self-directed data engineering framework modeling an end-to-end cloud ELT data pipeline and dimensional data warehouse based on a high-scale car-sharing scenario. Built entirely on cloud infrastructure (Supabase/PostgreSQL) via a secure Connection Pooler layer, this project implements a self-healing processing layer, decoupled code verification suites, and declarative data schema validation shields.
+A self-directed data engineering framework modeling an end-to-end cloud ELT data pipeline and dimensional data warehouse based on a high-scale car-sharing scenario. Built entirely on cloud infrastructure (Supabase/PostgreSQL) via a secure Connection Pooler layer, this project implements a self-healing processing layer, corporate observability logging handlers, decoupled code verification suites, and declarative data schema validation shields.
 
 ## 🔗 Live Interactive Dashboard
 👉 **[CLICK HERE TO OPEN THE LIVE MANAGEMENT DASHBOARD](https://datastudio.google.com/reporting/489ba77f-5b10-4aea-a723-47137253b3d6)**  
@@ -10,20 +10,25 @@ A self-directed data engineering framework modeling an end-to-end cloud ELT data
 
 ---
 
-## 🏗️ Architecture Design: Self-Healing, Decoupled Testing & Data Quality Shields
-To ensure zero data corruption, complete mathematical validity, and flawless project execution across cloud environments, the architecture implements a strict multi-layered validation layout:
-1. **Self-Healing Pre-Validation Layer:** Automatically coerces incoming primary key structures (e.g., preventing Monday morning schema drift by dynamically casting relational database sequence IDs to clean strings) and strips raw currency grouping separators, white spaces, or currency text markers before metrics conversion.
-2. **Decoupled Unit Testing (`pytest`):** Core transformation math and financial logic are fully isolated inside an independent module (`currency_parser.py`). This removes all environment, database, or connection footprints, executing table-driven parameterized tests to verify that negative refund values stay strictly negative.
-3. **Declarative Quality Assurance (`pandera`):** The data processing stream is heavily armed with a semantic quality schema mask. It automatically screens rows for missing cells, duplicates, out-of-bounds variables, or unexpected columns (`driver_id` vs `user_id`) before the database write phase.
-4. **Trunk Ingestion Optimization:** To safely stream data into the production warehouse without fracturing active transactional BI reporting and downstream SQL Views, the loading stage runs an automated `TRUNCATE TABLE` strategy inside atomic connection blocks.
+## 🏗️ Architecture Design: Enterprise Observability & Self-Healing Layout
+To meet the rigorous data quality, error boundaries, and monitoring standards required in production-grade platform deployments, the framework enforces a multi-layered verification layout:
+1. **Enterprise Logging Framework (`logging`):** Completely replaced legacy, unmonitored standard stdout text prints with a formal Python logging machine. Events, warning tracks, and subsystem errors are systematically tracked across precise execution states (`INFO`, `WARNING`, `CRITICAL`) to allow direct parsing by automated cloud orchestrators.
+2. **First-Class Rejection Metrics & Quarantine:** Malformed textual data corruptions or alphanumeric anomalies are proactively intercepted row-by-row. Instead of masking failures using silent zero conversions that skew averages downstream, corrupt fields are cast to explicit `NULL` maps and actively tracked as a first-class operational quality metric.
+3. **Automated Alerting Thresholds (Fail-Fast):** Incorporates an active runtime processing limit constraint. If the data ingestion pipeline encounters a critical row rejection rate greater than **25.0%** of the sample batch payload volume, the entire framework halts execution immediately and throws a hard termination state (`sys.exit(1)`) to trigger scheduler alerts.
+4. **Self-Healing Pre-Validation Layer:** Coerces incoming data structure alignments (e.g., automatically casting database sequence IDs to text strings) to eliminate schema drifts and strips raw currency grouping separators, white spaces, or currency text markers before metrics conversion.
+5. **Decoupled Unit Testing (`pytest`):** Core transformation math and financial logic are fully isolated inside an independent module (`currency_parser.py`). This removes all environment, database, or connection footprints, executing table-driven parameterized tests to verify that negative refund values stay strictly negative.
+6. **Declarative Quality Assurance (`pandera`):** Screens the fully aligned, cleaned, and healed dataframe for structural attributes, duplicate keys, and range constraints before allowing downstream relational loading.
+7. **Trunk Ingestion Optimization:** To safely stream data into the production warehouse without fracturing active transactional BI reporting and downstream SQL Views, the loading stage runs an automated `TRUNCATE TABLE` strategy inside atomic connection blocks.
 
 ---
 
 ## 📊 Project Scope & Simulated Business Scenario
-The architecture is engineered to resolve three core challenges:
+This portfolio project simulates the infrastructure required to solve data fragmentation from mobile application streams and telematics. The architecture is engineered to resolve three core challenges:
 1. **Historical Currency Inconsistency:** Processing raw ride records ingested concurrently in multiple currencies (CZK, USD, EUR) to establish a unified financial reporting layer in EUR based on explicit transactional execution dates.
 2. **Adversarial Text Ingestion Malfunctions:** Preventing data quality degradation by intercepting corrupted text noise inside numerical price attributes (e.g., stopping nested order context IDs from distorting core metrics).
 3. **Missing Telematics Analytics:** Pre-computing precise trip runtime duration metrics from transactional timestamps to analyze asset idling and utilization.
+
+*Note: All transactional data utilized in this project is synthetically generated to model real-world scale and anomalies safely within a test environment.*
 
 ---
 
@@ -44,11 +49,11 @@ This repository demonstrates a production-grade approach to resolve data quality
 ```text
 bolt-drive-analytics/
 ├── currency_parser.py        # Pure Extracted Financial Business Logic Module (Decoupled for Testability)
-├── etl_bolt_drive.py         # Main ETL Pipeline Engine & Pandera Inline Schema Shield
-├── test_currency.py          # Automated Pytest Suite Simulator & Parametrized Crash Test Vectors
+├── etl_bolt_drive.py         # Main ETL Pipeline Engine & Pandera Inline Schema Shield with Logging
+├── test_currency.py          # Parametrized Pytest Suite Simulator & Automated Crash Test Vectors
 ├── create_tables.sql         # Core Structural Production Database Schemas
 ├── database_architecture.sql # Permanent Database Views, Triggers, and Analytical View Layouts
-├── requirements.txt          # Locked Software Dependency Layout
+├── requirements.txt          # Locked Software Dependency Layout Matrix
 └── README.md                 # Enterprise Systems Documentation
 ```
 
