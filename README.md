@@ -5,7 +5,7 @@
 A self-directed data engineering framework modeling an end-to-end cloud ELT data pipeline and dimensional data warehouse based on a high-scale car-sharing scenario. Built entirely on cloud infrastructure (Supabase/PostgreSQL) via a secure Connection Pooler layer, this project implements a self-healing processing layer, corporate observability logging handlers, decoupled code verification suites, idempotent write guarantees, and declarative data schema validation shields.
 
 ## 🔗 Live Interactive Dashboard
-👉 **[CLICK HERE TO OPEN THE LIVE MANAGEMENT DASHBOARD](https://google.com)**  
+👉 **[CLICK HERE TO OPEN THE LIVE MANAGEMENT DASHBOARD](https://datastudio.google.com/u/1/reporting/489ba77f-5b10-4aea-a723-47137253b3d6/page/FNw6F?hl=en)**  
 *(Feel free to interact with date ranges and look up specific simulated metrics for cities like Prague, Bratislava, or Frankfurt to watch the analytics recalculate).*
 
 ---
