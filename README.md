@@ -31,15 +31,18 @@ The architecture is engineered to resolve three core challenges:
 
 ---
 
-## 🏗️ 5-Stage Data Warehouse Pipeline Engineering
+## 🏗️ 5-Stage Data Warehouse Pipeline Engineering & BI Semantic Layer
 This repository demonstrates a production-grade approach to resolve data quality and temporal normalization challenges directly inside a PostgreSQL instance while strictly maintaining financial integrity standard constraints:
 
 1. **The Ingestion Layer (`raw_rides`):** Direct append-only storage staging layer simulating transactional inflows from car telematics.
-2. **High-Precision Numeric Vectoring:** Binary `float` data types have been entirely deprecated across all monetary pipelines. The ingestion engine enforces strict `decimal.Decimal` inside Python and `NUMERIC(10,2)` inside the cloud database to eliminate fractional drifts (`://30000000000000004.com`).
+2. **High-Precision Numeric Vectoring:** Binary `float` data types have been entirely deprecated across all monetary pipelines. The ingestion engine enforces strict `decimal.Decimal` inside Python and `NUMERIC(10,2)` inside the cloud database to eliminate fractional drifts.
 3. **Explicit Character Parsing (Regex Shield):** Blind string replacement filters have been replaced with a strict, non-destructive Regular Expression parser (`^-?\\d+(?:\\.\\d+)?$`). Malformed alphanumeric payloads (e.g., `"45 (order 5000)"`) are safely rejected and isolated instead of being incorrectly concatenated.
 4. **Negative Vector Safety (Refund Shield):** The parsing grammar explicitly validates and preserves leading negative flags (`-`), ensuring financial refunds remain negative data points instead of silently mutating into false revenue spikes.
 5. **Slowly Changing Dimensions (SCD Type 2):** The dimensional exchange matrix (`dim_exchange_rates`) incorporates active date horizons (`valid_from`, `valid_to`). Conversions automatically utilize the precise historical exchange rate applicable on the exact calendar date of the ride transaction.
-6. **The Metrics Semantic View (`view_clean_reporting`):** Blends normalized transaction records with dimensional registries (`production_cars`, `production_locations`). Textual quality flags (`UNKNOWN`) are completely decoupled into a sibling column (`reporting_quality_flag`), ensuring the core price metric (`reporting_price`) remains a pure numeric measure fully compatible with Power BI and Looker Studio `SUM()` and `AVERAGE()` aggregations.
+6. **Advanced SQL Business Intelligence Mart (`v_bi_enterprise_reporting_marts`):** Blends normalized transaction records with dimensional registries (`production_cars`, `production_locations`). To optimize performance inside **Google Looker Studio** and avoid resource-intensive client-side rendering, analytical aggregations are pushed down into database sémantic layer via **Common Table Expressions (CTEs)** and high-performance **SQL Window Functions**:
+    * **Cumulative Cashflow Velocity (`SUM() OVER`):** Computes precise running revenue totals partitioned by operational cities over chronological time series.
+    * **Dynamic User Segmentation (`ROW_NUMBER() OVER`):** Periodically ranks customer transaction behavior to segment user velocities into deterministic business tiers (`Top Tier VIP`, `High Value Active`) for instant dashboard slicing.
+    * **Metrics Separation Shield:** Textual quality flags (`UNKNOWN`) are decoupled into a sibling column (`reporting_quality_flag`), ensuring the core price metric (`reporting_price`) remains a pure numeric measure fully compatible with Looker Studio numerical aggregations.
 
 ---
 
