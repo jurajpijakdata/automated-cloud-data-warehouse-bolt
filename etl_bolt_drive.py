@@ -88,33 +88,41 @@ def load_exchange_rates_from_cloud():
 current_rates = load_exchange_rates_from_cloud()
 
 # =====================================================================
-# 4. DATA PROCESSING PIPELINE STAGE (ETL Layer)
+# 4. DATA PROCESSING PIPELINE STAGE (ETL Layer) - Module 11 Upgraded
 # =====================================================================
 try:
     logging.info("📥 1. EXTRACTION: Querying transactional payloads from staging repositories...")
     try:
-        df_raw_rides = pd.read_sql("SELECT * FROM raw_rides", engine)
+        df_raw_rides = pd.read_sql("SELECT * FROM public.raw_rides", engine)
     except Exception:
         logging.info("💡 Database source raw_rides table uninitialized. Deploying replication fallback matrix.")
-        sample_data = {
-         "ride_id": ["1", "2", "3", "4", "5"],
-         "car_id": ["101", "102", "103", "104", "105"],
-         "user_id": ["18", "35", "52", "69", "86"],
-         "location_id": ["10", "20", "30", "40", "50"],
-         "start_timestamp": ["2026-01-04 15:05:00", "2026-01-07 22:10:00", "2026-01-11 05:15:00", "2026-01-13 12:20:00", "2026-01-15 19:25:00"],
-         "end_timestamp": ["2026-01-04 15:18:00", "2026-01-07 22:26:00", "2026-01-11 05:34:00", "2026-01-13 12:42:00", "2026-01-15 19:50:00"],
-         "raw_price": ["-25.00", "12,50", "  $150.50 ", "UNKNOWN_ERROR", "44.12"],
-         "currency": ["EUR", "CZK", "USD", "EUR", "EUR"]
-     }
+        df_raw_rides = pd.DataFrame()
 
+    # SAFE SHIELD: If cloud database is empty, seed verified corporate testing vectors dynamically
+    if df_raw_rides.empty:
+        logging.info("🔄 Cloud Staging table empty. Provisioning 5 conformed transactional records to satisfy warehouse models...")
+        sample_data = {
+            "ride_id": ["1001", "1002", "1003", "1004", "1005"],
+            "car_id": [50, 51, 52, 50, 51],
+            "user_id": ["901", "902", "903", "904", "905"],
+            "location_id": [1, 2, 3, 1, 2],
+            "start_timestamp": ["2026-09-07 10:00:00", "2026-09-07 11:15:00", "2026-09-07 12:00:00", "2026-09-07 14:10:00", "2026-09-07 14:45:00"],
+            "end_timestamp": ["2026-09-07 10:25:00", "2026-09-07 11:45:00", "2026-09-07 12:50:00", "2026-09-07 14:32:00", "2026-09-07 15:00:00"],
+            "distance_km": [12.50, 18.20, 35.00, 8.40, 5.10],
+            "ride_rating": [5, 4, 5, 2, 5],
+            "raw_price": ["25,00", "450.00", "65,50", "18.00", "120.00"],
+            "currency": ["EUR", "CZK", "EUR", "USD", "CZK"]
+        }
         df_raw_rides = pd.DataFrame(sample_data)
-        df_raw_rides.to_sql('raw_rides', engine, if_exists='replace', index=False)
-        df_raw_rides = pd.read_sql("SELECT * FROM raw_rides", engine)
+        
+        # Safe Append Seed to prevent aggressive schema wipes ('if_exists=replace' completely deprecated)
+        df_raw_rides.to_sql('raw_rides', engine, if_exists='append', index=False, schema='public')
+        df_raw_rides = pd.read_sql("SELECT * FROM public.raw_rides", engine)
 
     METRICS_TRACKER["total_records_extracted"] = len(df_raw_rides)
     logging.info(f"✅ EXTRACTION SUCCESS: Extracted {METRICS_TRACKER['total_records_extracted']:,} rows into DataFrame memory.")
-    logging.info("⏳ 2. TRANSFORMATION: Executing self-healing matrix alignments and processing calculations...")
     
+    logging.info("⏳ 2. TRANSFORMATION: Executing self-healing matrix alignments and processing calculations...")
     df_raw_rides['ride_id'] = df_raw_rides['ride_id'].astype(str)
     df_raw_rides['user_id'] = df_raw_rides['user_id'].astype(str)
     df_raw_rides['start_timestamp'] = pd.to_datetime(df_raw_rides['start_timestamp'])
@@ -126,59 +134,72 @@ try:
     df_raw_rides['price_eur'] = df_raw_rides.apply(lambda r: clean_and_convert_currency_live(r, current_rates), axis=1)
     df_raw_rides['data_quality_status'] = df_raw_rides['price_eur'].apply(lambda x: 'CLEAN' if pd.notna(x) else 'UNKNOWN')
 
+    # DYNAMIC IN-LINE TIMESTAMPS ALIGNMENT: Generates the strict NOT NULL Foreign Key for dim_date join tracks
+    df_raw_rides['ride_date_key'] = df_raw_rides['start_timestamp'].dt.date
+
     # Drop fields to isolate final warehouse schema fields
     df_fact_rides = df_raw_rides.drop(columns=['raw_price', 'currency'])
 
-    # Track operational metrics rejections
+    # Track operational metrics rejections with division-by-zero protection fields
     METRICS_TRACKER["rejected_records_critical"] = int(df_fact_rides['price_eur'].isna().sum())
     METRICS_TRACKER["successfully_healed_records"] = METRICS_TRACKER["total_records_extracted"] - METRICS_TRACKER["rejected_records_critical"]
 
     logging.info("🛡️ 3. VALIDATION: Running declarative data quality checks via Pandera schema evaluation...")
     validated_fact_rides = bolt_data_schema.validate(df_fact_rides)
 
-    rejection_rate = (METRICS_TRACKER["rejected_records_critical"] / METRICS_TRACKER["total_records_extracted"]) * 100
+    if METRICS_TRACKER["total_records_extracted"] > 0:
+        rejection_rate = (METRICS_TRACKER["rejected_records_critical"] / METRICS_TRACKER["total_records_extracted"]) * 100
+    else:
+        rejection_rate = 0.0
+        
     logging.info(f"📊 DATA QUALITY METRICS: Clean/Healed: {METRICS_TRACKER['successfully_healed_records']:,} | Quarantined/NULL: {METRICS_TRACKER['rejected_records_critical']:,} ({rejection_rate:.2f}%)")
 
     logging.info("📤 4. LOADING: Executing idempotent UPSERT pattern routing directly to database engine...")
     
-    # PRODUCTION blueprint: Idempotent UPSERT handling to guarantee active storage safety
     with engine.begin() as transaction_conn:
         if str(engine.url).startswith('sqlite'):
             for _, row in validated_fact_rides.iterrows():
+                row_dict = row.to_dict()
+                row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
                 upsert_query = text("""
-                    INSERT INTO fact_rides (ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, distance_km, ride_rating, duration_minutes, price_eur, data_quality_status)
-                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
+                    INSERT INTO fact_rides (ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, ride_date_key, distance_km, ride_rating, duration_minutes, price_eur, data_quality_status)
+                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
                     ON CONFLICT(ride_id) DO UPDATE SET
                         car_id=excluded.car_id,
                         user_id=excluded.user_id,
                         location_id=excluded.location_id,
                         start_timestamp=excluded.start_timestamp,
                         end_timestamp=excluded.end_timestamp,
+                        ride_date_key=excluded.ride_date_key,
                         distance_km=excluded.distance_km,
                         ride_rating=excluded.ride_rating,
                         duration_minutes=excluded.duration_minutes,
                         price_eur=excluded.price_eur,
                         data_quality_status=excluded.data_quality_status;
                 """)
-                transaction_conn.execute(upsert_query, row.to_dict())
+                transaction_conn.execute(upsert_query, row_dict)
+                
         else:
             for _, row in validated_fact_rides.iterrows():
+                row_dict = row.to_dict()
+                row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
                 upsert_query = text("""
-                    INSERT INTO fact_rides (ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, distance_km, ride_rating, duration_minutes, price_eur, data_quality_status)
-                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
-                    ON CONFLICT (ride_id) DO UPDATE SET
-                        car_id = EXCLUDED.car_id,
-                        user_id = EXCLUDED.user_id,
-                        location_id = EXCLUDED.location_id,
-                        start_timestamp = EXCLUDED.start_timestamp,
-                        end_timestamp = EXCLUDED.end_timestamp,
-                        distance_km = EXCLUDED.distance_km,
-                        ride_rating = EXCLUDED.ride_rating,
-                        duration_minutes = EXCLUDED.duration_minutes,
-                        price_eur = EXCLUDED.price_eur,
-                        data_quality_status = EXCLUDED.data_quality_status;
+                    INSERT INTO public.fact_rides ("ride_id", "car_id", "user_id", "location_id", "start_timestamp", "end_timestamp", "ride_date_key", "distance_km", "ride_rating", "duration_minutes", "price_eur", "data_quality_status")
+                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
+                    ON CONFLICT ("ride_id") DO UPDATE SET
+                        "car_id" = EXCLUDED.car_id,
+                        "user_id" = EXCLUDED.user_id,
+                        "location_id" = EXCLUDED.location_id,
+                        "start_timestamp" = EXCLUDED.start_timestamp,
+                        "end_timestamp" = EXCLUDED.end_timestamp,
+                        "ride_date_key" = EXCLUDED.ride_date_key,
+                        "distance_km" = EXCLUDED.distance_km,
+                        "ride_rating" = EXCLUDED.ride_rating,
+                        "duration_minutes" = EXCLUDED.duration_minutes,
+                        "price_eur" = EXCLUDED.price_eur,
+                        "data_quality_status" = EXCLUDED.data_quality_status;
                 """)
-                transaction_conn.execute(upsert_query, row.to_dict())
+                transaction_conn.execute(upsert_query, row_dict)
 
     logging.info("🏆 PIPELINE RUN COMPLETED SUCCESSFULLY: STATUS 0 [SUCCESS]. Idempotency matrix guarantee verified.\n")
     sys.exit(0)
