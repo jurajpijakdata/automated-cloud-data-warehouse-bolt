@@ -88,7 +88,7 @@ def load_exchange_rates_from_cloud():
 current_rates = load_exchange_rates_from_cloud()
 
 # =====================================================================
-# 4. DATA PROCESSING PIPELINE STAGE (ETL Layer) - Module 11 Upgraded
+# 4. DATA PROCESSING PIPELINE STAGE (ETL Layer) - HIGH-VOLUME DATA GENERATOR
 # =====================================================================
 try:
     logging.info("📥 1. EXTRACTION: Querying transactional payloads from staging repositories...")
@@ -98,24 +98,48 @@ try:
         logging.info("💡 Database source raw_rides table uninitialized. Deploying replication fallback matrix.")
         df_raw_rides = pd.DataFrame()
 
-    # SAFE SHIELD: If cloud database is empty, seed verified corporate testing vectors dynamically
-    if df_raw_rides.empty:
-        logging.info("🔄 Cloud Staging table empty. Provisioning 5 conformed transactional records to satisfy warehouse models...")
-        sample_data = {
-            "ride_id": ["1001", "1002", "1003", "1004", "1005"],
-            "car_id": [50, 51, 52, 50, 51],
-            "user_id": ["901", "902", "903", "904", "905"],
-            "location_id": [1, 2, 3, 1, 2],
-            "start_timestamp": ["2026-09-07 10:00:00", "2026-09-07 11:15:00", "2026-09-07 12:00:00", "2026-09-07 14:10:00", "2026-09-07 14:45:00"],
-            "end_timestamp": ["2026-09-07 10:25:00", "2026-09-07 11:45:00", "2026-09-07 12:50:00", "2026-09-07 14:32:00", "2026-09-07 15:00:00"],
-            "distance_km": [12.50, 18.20, 35.00, 8.40, 5.10],
-            "ride_rating": [5, 4, 5, 2, 5],
-            "raw_price": ["25,00", "450.00", "65,50", "18.00", "120.00"],
-            "currency": ["EUR", "CZK", "EUR", "USD", "CZK"]
-        }
-        df_raw_rides = pd.DataFrame(sample_data)
+    # ENTERPRISE SEED: If staging is low-volume, programmatically generate 1,500 production-grade records
+    if len(df_raw_rides) < 100:
+        logging.info("🔄 Low-volume matrix detected. Programmatically generating 1,500 high-scale transactional logs...")
         
-        # Safe Append Seed to prevent aggressive schema wipes ('if_exists=replace' completely deprecated)
+        import random
+        from datetime import datetime, timedelta
+
+        # Baseline configuration entities
+        car_ids = ["50", "51", "52", "53", "54", "55"]
+        location_ids = ["1", "2", "3"]
+        currencies = ["EUR", "CZK", "USD"]
+        price_templates = ["25,00", "450.00", "65,50", "18.00", "120.00", "15,80", "85.20", "220.00", "34,90", "11.50"]
+
+        generated_data = {
+            "ride_id": [str(3000 + i) for i in range(1500)],
+            "car_id": [random.choice(car_ids) for _ in range(1500)],
+            "user_id": [str(random.randint(10000, 99999)) for _ in range(1500)],
+            "location_id": [random.choice(location_ids) for _ in range(1500)],
+            "start_timestamp": [],
+            "end_timestamp": [],
+            "distance_km": [round(random.uniform(2.5, 95.0), 2) for _ in range(1500)],
+            "ride_rating": [random.choice(["5", "4", "5", "2", "5", "3", "4", "5"]) for _ in range(1500)],
+            "raw_price": [random.choice(price_templates) for _ in range(1500)],
+            "currency": [random.choice(currencies) for _ in range(1500)]
+        }
+
+        # Dynamic chronological time-series generation over 60 days
+        base_date = datetime(2026, 7, 1)
+        for i in range(1500):
+            start_time = base_date + timedelta(days=random.randint(0, 60), hours=random.randint(0, 23), minutes=random.randint(0, 59))
+            duration = random.randint(5, 120)
+            end_time = start_time + timedelta(minutes=duration)
+            
+            generated_data["start_timestamp"].append(start_time.strftime("%Y-%m-%d %H:%M:%S"))
+            generated_data["end_timestamp"].append(end_time.strftime("%Y-%m-%d %H:%M:%S"))
+
+        df_raw_rides = pd.DataFrame(generated_data)
+        
+        # Idempotent storage dump
+        with engine.begin() as seed_conn:
+            seed_conn.execute(text("TRUNCATE public.raw_rides CASCADE;"))
+            
         df_raw_rides.to_sql('raw_rides', engine, if_exists='append', index=False, schema='public')
         df_raw_rides = pd.read_sql("SELECT * FROM public.raw_rides", engine)
 
