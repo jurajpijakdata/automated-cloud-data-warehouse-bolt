@@ -222,3 +222,16 @@ SELECT
     price_eur AS reporting_price,
     data_quality_status AS reporting_quality_flag
 FROM public.view_fleet_performance;
+
+-- =====================================================================
+-- 7. SECURITY & REPUTATION COMPLIANCE LAYER 
+-- =====================================================================
+
+-- Row-Level Security (RLS) 
+ALTER TABLE IF EXISTS public.raw_rides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.dim_exchange_rates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.production_locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.production_cars ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.dim_date ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.fact_rides ENABLE ROW LEVEL SECURITY;
+
