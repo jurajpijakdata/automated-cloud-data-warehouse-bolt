@@ -94,59 +94,23 @@ CREATE TABLE IF NOT EXISTS public.fact_rides (
 );
 
 -- =====================================================================
--- 4. ADVANCED FINANCIAL REGEX SANITIZATION ENGINE (The Database Brain)
+-- 4. DATE DIMENSION AUTO-POPULATION
 -- =====================================================================
-CREATE OR REPLACE FUNCTION public.sync_raw_to_fact_function()
+-- This trigger has exactly one job: make sure a row exists in dim_date
+-- for every calendar day a ride touches, so the fact_rides foreign key
+-- (fk_fact_rides_date) never fails. It used to also duplicate the
+-- currency parsing and fact_rides upsert that etl_bolt_drive.py already
+-- does in Python -- that meant the same transformation logic existed in
+-- two places (SQL and Python) that could silently drift apart. The
+-- Python ETL is the single source of truth for fact_rides; this trigger
+-- only feeds the date dimension it depends on.
+CREATE OR REPLACE FUNCTION public.ensure_date_dimension_function()
 RETURNS TRIGGER AS $$
 DECLARE
-    active_rate DECIMAL(10,4);
-    calculated_minutes DECIMAL(10,1);
-    calculated_price_eur DECIMAL(10,2);
-    price_working_text VARCHAR(50);
-    final_raw_price DECIMAL(10,2);
-    clean_currency VARCHAR(3);
     ride_date DATE;
-    quality_status VARCHAR(20) := 'CLEAN';
 BEGIN
     ride_date := NEW.start_timestamp::DATE;
 
-    price_working_text := TRIM(NEW.raw_price);
-    price_working_text := REPLACE(price_working_text, '€', '');
-    price_working_text := REPLACE(price_working_text, '$', '');
-    price_working_text := REPLACE(price_working_text, ',', '.');
-
-    IF price_working_text !~ '^-?[0-9]+(?:\.[0-9]+)?$' OR price_working_text IS NULL OR price_working_text = '' THEN
-        quality_status := 'UNKNOWN';
-        final_raw_price := NULL;
-    ELSE
-        final_raw_price := price_working_text::DECIMAL(10,2);
-    END IF;
-
-    clean_currency := UPPER(TRIM(COALESCE(NEW.currency, 'EUR')));
-    IF clean_currency = '' THEN clean_currency := 'EUR'; END IF;
-
-    calculated_minutes := ROUND((EXTRACT(EPOCH FROM (NEW.end_timestamp - NEW.start_timestamp)) / 60.0)::NUMERIC, 1);
-
-    IF final_raw_price IS NULL THEN
-        calculated_price_eur := NULL;
-    ELSE
-        -- FIXED FX LOOKUP VECTOR: Now safely queries external dim_exchange_rates table attributes correctly
-        SELECT er.exchange_rate_to_eur INTO active_rate 
-        FROM public.dim_exchange_rates er
-        WHERE er.currency = clean_currency 
-          AND ride_date >= er.valid_from 
-          AND (er.valid_to IS NULL OR ride_date <= er.valid_to)
-        LIMIT 1;
-
-        IF active_rate IS NULL OR active_rate <= 0 THEN active_rate := 1.0; END IF;
-        calculated_price_eur := ROUND((final_raw_price / active_rate), 2);
-    END IF;
-
-    IF NEW.ride_rating < 1 OR NEW.ride_rating > 5 THEN
-        NEW.ride_rating := NULL;
-    END IF;
-
-    -- SAMOOPRAVA KALENDÁRA: Dynamicky vložíme chýbajúci dátum do dim_date pred zápisom do faktov
     INSERT INTO public.dim_date (date_key, year_attribute, month_attribute, month_name_attribute, quarter_attribute, week_of_year_attribute, day_of_week_attribute, is_weekend_attribute)
     VALUES (
         ride_date,
@@ -159,36 +123,16 @@ BEGIN
         CASE WHEN EXTRACT(ISODOW FROM ride_date) IN (6, 7) THEN TRUE ELSE FALSE END
     ) ON CONFLICT (date_key) DO NOTHING;
 
-    INSERT INTO public.fact_rides (
-        ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, ride_date_key,
-        distance_km, ride_rating, duration_minutes, price_eur, data_quality_status
-    )
-    VALUES (
-        NEW.ride_id::INT, NEW.car_id, NEW.user_id, NEW.location_id, NEW.start_timestamp, NEW.end_timestamp, ride_date,
-        NEW.distance_km, NEW.ride_rating, calculated_minutes, calculated_price_eur, quality_status
-    )
-    ON CONFLICT (ride_id) DO UPDATE SET
-        car_id = EXCLUDED.car_id,
-        user_id = EXCLUDED.user_id,
-        location_id = EXCLUDED.location_id,
-        start_timestamp = EXCLUDED.start_timestamp,
-        end_timestamp = EXCLUDED.end_timestamp,
-        ride_date_key = EXCLUDED.ride_date_key,
-        distance_km = EXCLUDED.distance_km,
-        ride_rating = EXCLUDED.ride_rating,
-        duration_minutes = EXCLUDED.duration_minutes,
-        price_eur = EXCLUDED.price_eur,
-        data_quality_status = EXCLUDED.data_quality_status;
-
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_sync_raw_to_fact ON public.raw_rides;
-CREATE TRIGGER trg_sync_raw_to_fact
+DROP TRIGGER IF EXISTS trg_ensure_date_dimension ON public.raw_rides;
+CREATE TRIGGER trg_ensure_date_dimension
 AFTER INSERT ON public.raw_rides
 FOR EACH ROW
-EXECUTE FUNCTION public.sync_raw_to_fact_function();
+EXECUTE FUNCTION public.ensure_date_dimension_function();
 
 -- =====================================================================
 -- 5. PERFORMANCE OPTIMIZATION LAYER (Analytical Filter Indexing Matrix)

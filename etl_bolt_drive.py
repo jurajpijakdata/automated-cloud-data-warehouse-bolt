@@ -179,51 +179,62 @@ try:
     logging.info(f"📊 DATA QUALITY METRICS: Clean/Healed: {METRICS_TRACKER['successfully_healed_records']:,} | Quarantined/NULL: {METRICS_TRACKER['rejected_records_critical']:,} ({rejection_rate:.2f}%)")
 
     logging.info("📤 4. LOADING: Executing idempotent UPSERT pattern routing directly to database engine...")
-    
+
+    # Build all row dicts once, then send them to the database as a single
+    # bulk statement instead of one round-trip per row. Passing a list of
+    # parameter dicts to execute() lets SQLAlchemy expand it into one
+    # multi-row executemany -- this is what actually lets the load step
+    # scale past a demo-sized table; a Python for-loop issuing one INSERT
+    # per row does not.
+    records = []
+    for _, row in validated_fact_rides.iterrows():
+        row_dict = row.to_dict()
+        row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
+        records.append(row_dict)
+
+    if str(engine.url).startswith('sqlite'):
+        upsert_query = text("""
+            INSERT INTO fact_rides (ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, ride_date_key, distance_km, ride_rating, duration_minutes, price_eur, data_quality_status)
+            VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
+            ON CONFLICT(ride_id) DO UPDATE SET
+                car_id=excluded.car_id,
+                user_id=excluded.user_id,
+                location_id=excluded.location_id,
+                start_timestamp=excluded.start_timestamp,
+                end_timestamp=excluded.end_timestamp,
+                ride_date_key=excluded.ride_date_key,
+                distance_km=excluded.distance_km,
+                ride_rating=excluded.ride_rating,
+                duration_minutes=excluded.duration_minutes,
+                price_eur=excluded.price_eur,
+                data_quality_status=excluded.data_quality_status;
+        """)
+    else:
+        upsert_query = text("""
+            INSERT INTO public.fact_rides ("ride_id", "car_id", "user_id", "location_id", "start_timestamp", "end_timestamp", "ride_date_key", "distance_km", "ride_rating", "duration_minutes", "price_eur", "data_quality_status")
+            VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
+            ON CONFLICT ("ride_id") DO UPDATE SET
+                "car_id" = EXCLUDED.car_id,
+                "user_id" = EXCLUDED.user_id,
+                "location_id" = EXCLUDED.location_id,
+                "start_timestamp" = EXCLUDED.start_timestamp,
+                "end_timestamp" = EXCLUDED.end_timestamp,
+                "ride_date_key" = EXCLUDED.ride_date_key,
+                "distance_km" = EXCLUDED.distance_km,
+                "ride_rating" = EXCLUDED.ride_rating,
+                "duration_minutes" = EXCLUDED.duration_minutes,
+                "price_eur" = EXCLUDED.price_eur,
+                "data_quality_status" = EXCLUDED.data_quality_status;
+        """)
+
+    # Chunk the bulk execute so a run of a few hundred thousand rows doesn't
+    # build one unbounded statement -- keeps memory and lock time predictable
+    # as volume grows.
+    CHUNK_SIZE = 1000
     with engine.begin() as transaction_conn:
-        if str(engine.url).startswith('sqlite'):
-            for _, row in validated_fact_rides.iterrows():
-                row_dict = row.to_dict()
-                row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
-                upsert_query = text("""
-                    INSERT INTO fact_rides (ride_id, car_id, user_id, location_id, start_timestamp, end_timestamp, ride_date_key, distance_km, ride_rating, duration_minutes, price_eur, data_quality_status)
-                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
-                    ON CONFLICT(ride_id) DO UPDATE SET
-                        car_id=excluded.car_id,
-                        user_id=excluded.user_id,
-                        location_id=excluded.location_id,
-                        start_timestamp=excluded.start_timestamp,
-                        end_timestamp=excluded.end_timestamp,
-                        ride_date_key=excluded.ride_date_key,
-                        distance_km=excluded.distance_km,
-                        ride_rating=excluded.ride_rating,
-                        duration_minutes=excluded.duration_minutes,
-                        price_eur=excluded.price_eur,
-                        data_quality_status=excluded.data_quality_status;
-                """)
-                transaction_conn.execute(upsert_query, row_dict)
-                
-        else:
-            for _, row in validated_fact_rides.iterrows():
-                row_dict = row.to_dict()
-                row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
-                upsert_query = text("""
-                    INSERT INTO public.fact_rides ("ride_id", "car_id", "user_id", "location_id", "start_timestamp", "end_timestamp", "ride_date_key", "distance_km", "ride_rating", "duration_minutes", "price_eur", "data_quality_status")
-                    VALUES (:ride_id, :car_id, :user_id, :location_id, :start_timestamp, :end_timestamp, :ride_date_key, :distance_km, :ride_rating, :duration_minutes, :price_eur, :data_quality_status)
-                    ON CONFLICT ("ride_id") DO UPDATE SET
-                        "car_id" = EXCLUDED.car_id,
-                        "user_id" = EXCLUDED.user_id,
-                        "location_id" = EXCLUDED.location_id,
-                        "start_timestamp" = EXCLUDED.start_timestamp,
-                        "end_timestamp" = EXCLUDED.end_timestamp,
-                        "ride_date_key" = EXCLUDED.ride_date_key,
-                        "distance_km" = EXCLUDED.distance_km,
-                        "ride_rating" = EXCLUDED.ride_rating,
-                        "duration_minutes" = EXCLUDED.duration_minutes,
-                        "price_eur" = EXCLUDED.price_eur,
-                        "data_quality_status" = EXCLUDED.data_quality_status;
-                """)
-                transaction_conn.execute(upsert_query, row_dict)
+        for i in range(0, len(records), CHUNK_SIZE):
+            chunk = records[i:i + CHUNK_SIZE]
+            transaction_conn.execute(upsert_query, chunk)
 
     logging.info("🏆 PIPELINE RUN COMPLETED SUCCESSFULLY: STATUS 0 [SUCCESS]. Idempotency matrix guarantee verified.\n")
     sys.exit(0)
