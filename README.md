@@ -36,7 +36,7 @@ Raw ride records come in messy: prices are logged in three currencies (CZK, USD,
 
 **Schema validation.** `pandera` checks the shape and types of the data (required columns, non-negative durations, etc.) before anything is written to the warehouse.
 
-**Tested business logic.** The currency conversion logic is isolated in its own module and covered by a parametrized pytest suite, so it can be tested without a database connection. Tests run automatically in CI on every push (see the badge above).
+**Tested at two levels.** The currency conversion logic is isolated in its own module and covered by a parametrized pytest suite that runs without a database connection. A second, integration-level test actually runs the full pipeline end to end against the SQLite fallback (extract, transform, validate, load) and checks it completes successfully -- this is what caught the SQLite-compatibility issues the fallback path used to have. Both run automatically in CI on every push (see the badge above).
 
 **Slowly Changing Dimensions.** `dim_exchange_rates` and `production_cars` both use SCD Type 2 (`valid_from` / `valid_to`), so historical reporting always uses the values that were correct at the time of the transaction, not the current ones.
 
@@ -50,8 +50,9 @@ Raw ride records come in messy: prices are logged in three currencies (CZK, USD,
 automated-cloud-data-warehouse-bolt/
 ├── currency_parser.py          # Currency parsing & EUR conversion logic (unit tested)
 ├── etl_bolt_drive.py           # Main ETL: extract, transform, validate, bulk upsert
-├── test_currency.py            # Pytest suite for currency_parser.py
-├── create_tables.sql           # Star schema: staging, dimensions, fact table, indexes
+├── test_currency.py            # Unit tests for currency_parser.py
+├── test_etl_pipeline.py        # Integration test: runs the full pipeline end to end
+├── create_tables.sql           # Star schema: staging, dimensions, fact table, indexes, RLS policies
 ├── database_architecture.sql   # Reporting view with CTEs & window functions
 ├── requirements.txt            # Pinned dependencies
 ├── .github/workflows/tests.yml # CI: runs the test suite on every push/PR
@@ -70,7 +71,7 @@ pip install -r requirements.txt
 ### 2. Run the test suite
 
 ```bash
-pytest test_currency.py -v
+pytest -v
 ```
 
 ### 3. (Optional) Configure database credentials

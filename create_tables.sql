@@ -171,11 +171,45 @@ FROM public.view_fleet_performance;
 -- 7. SECURITY & REPUTATION COMPLIANCE LAYER 
 -- =====================================================================
 
--- Row-Level Security (RLS) 
+-- Row-Level Security (RLS)
 ALTER TABLE IF EXISTS public.raw_rides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.dim_exchange_rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.production_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.production_cars ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.dim_date ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.fact_rides ENABLE ROW LEVEL SECURITY;
+
+-- Enabling RLS with no policies means default-deny for every role except
+-- the table owner (Postgres always lets the owner/superuser bypass RLS
+-- unless FORCE ROW LEVEL SECURITY is also set, which is deliberately not
+-- used here). The ETL pipeline connects with the project's owner
+-- credentials, so none of this affects how it loads data.
+--
+-- These policies give the `authenticated` role (e.g. a BI tool or
+-- dashboard service account going through Supabase's API layer)
+-- read-only access to the reporting tables. The `anon` (public,
+-- unauthenticated) role deliberately gets no policy at all, so it has
+-- zero access -- the secure default for a warehouse that may eventually
+-- hold real operational data. `raw_rides` is internal staging data and
+-- gets no read policy either; nothing outside the ETL process should
+-- query it directly.
+DROP POLICY IF EXISTS "Authenticated read access" ON public.fact_rides;
+CREATE POLICY "Authenticated read access" ON public.fact_rides
+    FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Authenticated read access" ON public.production_locations;
+CREATE POLICY "Authenticated read access" ON public.production_locations
+    FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Authenticated read access" ON public.production_cars;
+CREATE POLICY "Authenticated read access" ON public.production_cars
+    FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Authenticated read access" ON public.dim_date;
+CREATE POLICY "Authenticated read access" ON public.dim_date
+    FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Authenticated read access" ON public.dim_exchange_rates;
+CREATE POLICY "Authenticated read access" ON public.dim_exchange_rates
+    FOR SELECT TO authenticated USING (true);
 

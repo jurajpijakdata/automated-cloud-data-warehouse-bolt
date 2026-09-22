@@ -14,6 +14,16 @@ os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
 # Import the pure tested business logic from our currency parser module
 from currency_parser import clean_and_convert_currency_live
 
+# Force UTF-8 on stdout regardless of the calling environment's console
+# codepage. Without this, on Windows, running the script without an
+# interactive terminal attached (from a subprocess, a scheduler, or some
+# CI runners) falls back to a legacy encoding that can't represent the
+# emoji used in these log messages -- Python's logging module then fails
+# silently on every log call instead of crashing, so the pipeline appears
+# to run with zero visible output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # =====================================================================
 # ENTERPRISE LOGGING CONFIGURATION (Module 6 & 7 Standard)
 # =====================================================================
