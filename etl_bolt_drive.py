@@ -74,6 +74,30 @@ except Exception as db_error:
     engine = create_engine(connection_string)
     logging.info("🔌 Connection Status: [LOCAL ENGINE] Active Fallback SQLite Context Deployed.")
 
+    # create_tables.sql is PostgreSQL-specific (SERIAL columns, plpgsql
+    # triggers, Row-Level Security) and isn't meant to run against SQLite.
+    # This fallback only creates the one table the load step writes to, so
+    # the pipeline has somewhere to land data when no cloud database is
+    # configured -- it's for local demoing without credentials, not a full
+    # port of the production warehouse schema.
+    with engine.begin() as bootstrap_conn:
+        bootstrap_conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fact_rides (
+                ride_id TEXT PRIMARY KEY,
+                car_id TEXT,
+                user_id TEXT,
+                location_id TEXT,
+                start_timestamp TEXT,
+                end_timestamp TEXT,
+                ride_date_key TEXT,
+                distance_km REAL,
+                ride_rating TEXT,
+                duration_minutes REAL,
+                price_eur REAL,
+                data_quality_status TEXT
+            );
+        """))
+
 # =====================================================================
 # 3. EXCHANGE RATES MATRIX FETCHING
 # =====================================================================
@@ -92,8 +116,12 @@ current_rates = load_exchange_rates_from_cloud()
 # =====================================================================
 try:
     logging.info("📥 1. EXTRACTION: Querying transactional payloads from staging repositories...")
+    # SQLite has no schema concept, so the "public." prefix only applies on Postgres.
+    is_sqlite = str(engine.url).startswith('sqlite')
+    raw_rides_ref = "raw_rides" if is_sqlite else "public.raw_rides"
+
     try:
-        df_raw_rides = pd.read_sql("SELECT * FROM public.raw_rides", engine)
+        df_raw_rides = pd.read_sql(f"SELECT * FROM {raw_rides_ref}", engine)
     except Exception:
         logging.info("💡 Database source raw_rides table uninitialized. Deploying replication fallback matrix.")
         df_raw_rides = pd.DataFrame()
@@ -136,12 +164,22 @@ try:
 
         df_raw_rides = pd.DataFrame(generated_data)
         
-        # Idempotent storage dump
+        # Idempotent storage dump. On a brand-new database with nothing
+        # to clear yet, this is a no-op instead of an error.
         with engine.begin() as seed_conn:
-            seed_conn.execute(text("TRUNCATE public.raw_rides CASCADE;"))
-            
-        df_raw_rides.to_sql('raw_rides', engine, if_exists='append', index=False, schema='public')
-        df_raw_rides = pd.read_sql("SELECT * FROM public.raw_rides", engine)
+            try:
+                if is_sqlite:
+                    seed_conn.execute(text("DELETE FROM raw_rides;"))
+                else:
+                    seed_conn.execute(text("TRUNCATE public.raw_rides CASCADE;"))
+            except Exception:
+                pass
+
+        if is_sqlite:
+            df_raw_rides.to_sql('raw_rides', engine, if_exists='append', index=False)
+        else:
+            df_raw_rides.to_sql('raw_rides', engine, if_exists='append', index=False, schema='public')
+        df_raw_rides = pd.read_sql(f"SELECT * FROM {raw_rides_ref}", engine)
 
     METRICS_TRACKER["total_records_extracted"] = len(df_raw_rides)
     logging.info(f"✅ EXTRACTION SUCCESS: Extracted {METRICS_TRACKER['total_records_extracted']:,} rows into DataFrame memory.")
@@ -189,7 +227,14 @@ try:
     records = []
     for _, row in validated_fact_rides.iterrows():
         row_dict = row.to_dict()
+        # Stringify timestamps: pandas Timestamp objects can't be bound
+        # directly as SQLite parameters ("type 'Timestamp' is not
+        # supported"), and a plain string binds cleanly on both SQLite and
+        # Postgres (Postgres casts an ISO-formatted string to TIMESTAMP
+        # automatically on insert).
         row_dict['ride_date_key'] = str(row_dict['ride_date_key'])
+        row_dict['start_timestamp'] = str(row_dict['start_timestamp'])
+        row_dict['end_timestamp'] = str(row_dict['end_timestamp'])
         records.append(row_dict)
 
     if str(engine.url).startswith('sqlite'):
